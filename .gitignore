@@ -1,0 +1,20 @@
+# 個人の聴講記録・ログ(公開しない)
+reports/
+logs/
+
+# 秘密情報(API キーなど)。見本の .env.example は公開する
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# エディタ・OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

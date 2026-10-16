@@ -1,0 +1,6 @@
+# Claude を使う場合
+anthropic>=1.11
+# ChatGPT・ローカル LLM を使う場合
+openai>=1.40
+# レポートの PDF 作成(Markdown → HTML)
+markdown>=3.5
