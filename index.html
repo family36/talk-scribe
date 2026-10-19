@@ -1,774 +1,1479 @@
 <!doctype html>
 <html lang="ja">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>talk-scribe</title>
-<style>
-  :root {
-    --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #6b7385; --line: #e2e5eb;
-    --accent: #2f6fdf; --accent-weak: #e8f0fd; --rec: #d93a3a; --ok: #1f9d55;
-    color-scheme: light;
-  }
-  /* ダークモード: 「自動」なら OS の設定に従い、ボタンで固定もできる */
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #14171d; --panel: #1c2028; --text: #e6e9ef; --muted: #98a0b3; --line: #2c323d;
-      --accent: #6c9cf0; --accent-weak: #22304a; --rec: #f06464; --ok: #4cc584;
-      color-scheme: dark;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #14171d; --panel: #1c2028; --text: #e6e9ef; --muted: #98a0b3; --line: #2c323d;
-    --accent: #6c9cf0; --accent-weak: #22304a; --rec: #f06464; --ok: #4cc584;
-    color-scheme: dark;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; }
-  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px;
-           background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
-  header h1 { font-size: 16px; margin: 0 12px 0 0; }
-  .status { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
-  .dot.on { background: var(--rec); animation: pulse 1.2s infinite; }
-  @keyframes pulse { 50% { opacity: .35; } }
-  .spacer { flex: 1; }
-  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line);
-           background: var(--panel); color: var(--text); cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.rec { background: var(--rec); border-color: var(--rec); color: #fff; }
-  button:disabled { opacity: .5; cursor: default; }
-  input, select, textarea { font: inherit; color: var(--text); background: var(--bg);
-           border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
-  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; padding: 12px 16px; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
-  section h2 { font-size: 13px; color: var(--muted); margin: 0 0 6px; font-weight: 600;
-               display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  #now { font-size: 22px; line-height: 1.5; font-weight: 600; min-height: 3em; }
-  #topic { display: inline-block; font-size: 12px; background: var(--accent-weak); color: var(--accent);
-           border-radius: 999px; padding: 1px 10px; margin-bottom: 6px; }
-  #prev { font-size: 17px; line-height: 1.6; color: var(--muted); }
-  .topic { display: inline-block; font-size: 12px; background: var(--accent-weak); color: var(--accent);
-           border-radius: 999px; padding: 1px 10px; margin-bottom: 6px; }
-  #terms { margin: 0; overflow-y: auto; }
-  #terms .term { padding-bottom: 6px; }
-  #terms dt { font-weight: 600; } #terms dd { margin: 0; color: var(--muted); }
-  #transcript { height: 260px; overflow-y: auto; white-space: pre-wrap; font-size: 14px; }
-  #transcript .interim { color: var(--muted); }
-  #timeline { max-height: 240px; overflow-y: auto; font-size: 13px; margin: 0; padding: 0; list-style: none; }
-  #timeline li { border-left: 2px solid var(--line); padding: 2px 0 6px 10px; }
-  #timeline time { color: var(--muted); margin-right: 6px; font-variant-numeric: tabular-nums; }
-  .meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; font-size: 13px; }
-  .meta input, .meta select { width: 100%; }
-  .meta [hidden] { display: none; }
-  button.fold { border: none; background: none; padding: 0; font: inherit; color: inherit; font-weight: 600; }
-  .chev { display: inline-block; width: 1em; }
-  #metaSec.collapsed .meta { display: none; }
-  #metaSec.collapsed h2 { margin: 0; }
-  .brief { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; text-align: right; }
-  #metaSec:not(.collapsed) .brief { display: none; }
-  .meta input[type="checkbox"] { width: auto; margin: 0 6px 0 0; vertical-align: middle; }
-  .meta label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center; cursor: pointer; }
-  #notes { width: 100%; min-height: 120px; resize: vertical; }
-  /* 入力欄とボタンを同じ高さにそろえる(ボタン側の上下の余白をなくし、行の高さに合わせて伸ばす) */
-  .askRow { display: flex; gap: 6px; margin: 0; align-items: stretch; }
-  .askRow input { flex: 1; min-width: 0; }
-  .askRow button { white-space: nowrap; padding-top: 0; padding-bottom: 0; line-height: 1; }
-  .askAnswer { margin-top: 8px; white-space: pre-wrap; font-size: 14px; max-height: 320px; overflow-y: auto; }
-  .askAnswer .q { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
-  #report { width: 100%; min-height: 360px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
-  #jobs { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  #jobs li { display: flex; gap: 6px; align-items: stretch; }
-  #jobs button.job { flex: 1; min-width: 0; text-align: left; display: flex; gap: 10px; align-items: center; }
-  #jobs button.job.sel { border-color: var(--accent); background: var(--accent-weak); }
-  #jobs button.retry { white-space: nowrap; }
-  .badge { font-size: 12px; border-radius: 999px; padding: 0 8px; white-space: nowrap; }
-  .badge.running { background: var(--accent-weak); color: var(--accent); }
-  .badge.done { color: var(--ok); border: 1px solid var(--ok); }
-  .badge.error { color: var(--rec); border: 1px solid var(--rec); }
-  .muted { color: var(--muted); font-size: 12px; }
-  .err { color: var(--rec); font-size: 13px; }
-  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-</style>
-</head>
-<body>
-<header>
-  <h1>talk-scribe</h1>
-  <button id="btnRec" class="primary">● 聴講開始</button>
-  <button id="btnSummary">今すぐ要約</button>
-  <span class="status"><span id="dot" class="dot"></span><span id="statusText">停止中</span></span>
-  <span class="spacer"></span>
-  <button id="btnReport" class="primary" title="レポートを裏で作成し、すぐ次に移ります(聴講は止まりません)">レポート作成 → 次の発表へ</button>
-  <button id="btnNew" title="レポートを作らずに消去">破棄して次へ</button>
-  <button id="btnTheme" title="表示テーマを切り替え(自動 → ライト → ダーク)"></button>
-</header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>talk-scribe</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --panel: #fff;
+        --text: #1d2330;
+        --muted: #6b7385;
+        --line: #e2e5eb;
+        --accent: #2f6fdf;
+        --accent-weak: #e8f0fd;
+        --rec: #d93a3a;
+        --ok: #1f9d55;
+        color-scheme: light;
+      }
+      /* ダークモード: 「自動」なら OS の設定に従い、ボタンで固定もできる */
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #14171d;
+          --panel: #1c2028;
+          --text: #e6e9ef;
+          --muted: #98a0b3;
+          --line: #2c323d;
+          --accent: #6c9cf0;
+          --accent-weak: #22304a;
+          --rec: #f06464;
+          --ok: #4cc584;
+          color-scheme: dark;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #14171d;
+        --panel: #1c2028;
+        --text: #e6e9ef;
+        --muted: #98a0b3;
+        --line: #2c323d;
+        --accent: #6c9cf0;
+        --accent-weak: #22304a;
+        --rec: #f06464;
+        --ok: #4cc584;
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.6 system-ui,
+          -apple-system,
+          "Segoe UI",
+          "Hiragino Sans",
+          "Yu Gothic UI",
+          sans-serif;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 10px 16px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        z-index: 2;
+      }
+      header h1 {
+        font-size: 16px;
+        margin: 0 12px 0 0;
+      }
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      .dot.on {
+        background: var(--rec);
+        animation: pulse 1.2s infinite;
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.35;
+        }
+      }
+      .spacer {
+        flex: 1;
+      }
+      button {
+        font: inherit;
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      button.rec {
+        background: var(--rec);
+        border-color: var(--rec);
+        color: #fff;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      input,
+      select,
+      textarea {
+        font: inherit;
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 8px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+        gap: 12px;
+        padding: 12px 16px;
+      }
+      @media (max-width: 900px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-width: 0;
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px 14px;
+        min-width: 0;
+      }
+      section h2 {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 0 0 6px;
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      #now {
+        font-size: 22px;
+        line-height: 1.5;
+        font-weight: 600;
+        min-height: 3em;
+      }
+      #topic {
+        display: inline-block;
+        font-size: 12px;
+        background: var(--accent-weak);
+        color: var(--accent);
+        border-radius: 999px;
+        padding: 1px 10px;
+        margin-bottom: 6px;
+      }
+      #prev {
+        font-size: 17px;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+      .topic {
+        display: inline-block;
+        font-size: 12px;
+        background: var(--accent-weak);
+        color: var(--accent);
+        border-radius: 999px;
+        padding: 1px 10px;
+        margin-bottom: 6px;
+      }
+      #terms {
+        margin: 0;
+        overflow-y: auto;
+      }
+      #terms .term {
+        padding-bottom: 6px;
+      }
+      #terms dt {
+        font-weight: 600;
+      }
+      #terms dd {
+        margin: 0;
+        color: var(--muted);
+      }
+      #transcript {
+        height: 260px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        font-size: 14px;
+      }
+      #transcript .interim {
+        color: var(--muted);
+      }
+      #timeline {
+        max-height: 240px;
+        overflow-y: auto;
+        font-size: 13px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      #timeline li {
+        border-left: 2px solid var(--line);
+        padding: 2px 0 6px 10px;
+      }
+      #timeline time {
+        color: var(--muted);
+        margin-right: 6px;
+        font-variant-numeric: tabular-nums;
+      }
+      .meta {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px 8px;
+        align-items: center;
+        font-size: 13px;
+      }
+      .meta input,
+      .meta select {
+        width: 100%;
+      }
+      .meta [hidden] {
+        display: none;
+      }
+      button.fold {
+        border: none;
+        background: none;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        font-weight: 600;
+      }
+      .chev {
+        display: inline-block;
+        width: 1em;
+      }
+      #metaSec.collapsed .meta {
+        display: none;
+      }
+      #metaSec.collapsed h2 {
+        margin: 0;
+      }
+      .brief {
+        font-weight: 400;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        flex: 1;
+        text-align: right;
+      }
+      #metaSec:not(.collapsed) .brief {
+        display: none;
+      }
+      .meta input[type="checkbox"] {
+        width: auto;
+        margin: 0 6px 0 0;
+        vertical-align: middle;
+      }
+      .meta label:has(> input[type="checkbox"]) {
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+      }
+      #notes {
+        width: 100%;
+        min-height: 120px;
+        resize: vertical;
+      }
+      /* 入力欄とボタンを同じ高さにそろえる(ボタン側の上下の余白をなくし、行の高さに合わせて伸ばす) */
+      .askRow {
+        display: flex;
+        gap: 6px;
+        margin: 0;
+        align-items: stretch;
+      }
+      .askRow input {
+        flex: 1;
+        min-width: 0;
+      }
+      .askRow button {
+        white-space: nowrap;
+        padding-top: 0;
+        padding-bottom: 0;
+        line-height: 1;
+      }
+      .askAnswer {
+        margin-top: 8px;
+        white-space: pre-wrap;
+        font-size: 14px;
+        max-height: 320px;
+        overflow-y: auto;
+      }
+      .askAnswer .q {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 4px;
+      }
+      #report {
+        width: 100%;
+        min-height: 360px;
+        resize: vertical;
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 13px;
+      }
+      #jobs {
+        list-style: none;
+        margin: 0 0 8px;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      #jobs li {
+        display: flex;
+        gap: 6px;
+        align-items: stretch;
+      }
+      #jobs button.job {
+        flex: 1;
+        min-width: 0;
+        text-align: left;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      #jobs button.job.sel {
+        border-color: var(--accent);
+        background: var(--accent-weak);
+      }
+      #jobs button.retry {
+        white-space: nowrap;
+      }
+      .badge {
+        font-size: 12px;
+        border-radius: 999px;
+        padding: 0 8px;
+        white-space: nowrap;
+      }
+      .badge.running {
+        background: var(--accent-weak);
+        color: var(--accent);
+      }
+      .badge.done {
+        color: var(--ok);
+        border: 1px solid var(--ok);
+      }
+      .badge.error {
+        color: var(--rec);
+        border: 1px solid var(--rec);
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .err {
+        color: var(--rec);
+        font-size: 13px;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>talk-scribe</h1>
+      <button id="btnRec" class="primary">● 聴講開始</button>
+      <button id="btnSummary">今すぐ要約</button>
+      <span class="status"
+        ><span id="dot" class="dot"></span
+        ><span id="statusText">停止中</span></span
+      >
+      <span class="spacer"></span>
+      <button
+        id="btnReport"
+        class="primary"
+        title="レポートを裏で作成し、すぐ次に移ります(聴講は止まりません)"
+      >
+        レポート作成 → 次の発表へ
+      </button>
+      <button id="btnNew" title="レポートを作らずに消去">破棄して次へ</button>
+      <button
+        id="btnTheme"
+        title="表示テーマを切り替え(自動 → ライト → ダーク)"
+      ></button>
+    </header>
 
-<main>
-  <div class="col">
-    <section>
-      <h2>いま話している内容 <span id="lastUpdate" class="muted"></span></h2>
-      <div id="topic" hidden></div>
-      <div id="now"><span class="muted">「聴講開始」を押すと、ここに現在の話の要約が表示されます。</span></div>
-      <div id="sumErr" class="err"></div>
-    </section>
-    <section>
-      <h2>一つ前の内容 <span id="prevTime" class="muted"></span></h2>
-      <div id="prevTopic" class="topic" hidden></div>
-      <div id="prev"><span class="muted">まだありません</span></div>
-    </section>
-    <section>
-      <h2>文字起こし <span class="muted"><span id="wordCount">0</span> words</span></h2>
-      <div id="transcript"></div>
-    </section>
-    <section>
-      <h2>タイムライン</h2>
-      <ul id="timeline"></ul>
-    </section>
-  </div>
-
-  <div class="col">
-    <section id="metaSec">
-      <h2>
-        <button id="btnMeta" class="fold" title="開く/たたむ" aria-expanded="true"><span class="chev">▾</span> <span id="metaHeading">発表情報・設定</span></button>
-        <span id="metaBrief" class="muted brief"></span>
-      </h2>
-      <div class="meta">
-        <label for="mode">場面</label>
-        <select id="mode">
-          <option value="research">研究発表</option>
-          <option value="lecture">講演・セミナー</option>
-          <option value="meeting">会議</option>
-        </select>
-        <label for="mTitle" id="lblTitle">タイトル</label><input id="mTitle" placeholder="Paper title">
-        <label for="mSpeaker" id="lblSpeaker">発表者</label><input id="mSpeaker" placeholder="Speaker / Affiliation">
-        <label for="mSession" id="lblSession">セッション</label><input id="mSession" placeholder="Session / Room">
-        <label for="speechLang">音声言語</label>
-        <select id="speechLang">
-          <option value="en-US">English (US)</option>
-          <option value="en-GB">English (UK)</option>
-          <option value="en-IN">English (India)</option>
-          <option value="ja-JP">日本語</option>
-          <option value="zh-CN">中文</option>
-          <option value="ko-KR">한국어</option>
-          <option value="de-DE">Deutsch</option>
-          <option value="fr-FR">Français</option>
-        </select>
-        <label for="outLang">要約言語</label>
-        <select id="outLang"><option>日本語</option><option>English</option></select>
-        <label for="interval">要約間隔</label>
-        <select id="interval">
-          <option value="20">20 秒</option>
-          <option value="30" selected>30 秒</option>
-          <option value="60">60 秒</option>
-          <option value="0">手動のみ</option>
-        </select>
-        <label for="reportFormat">レポート形式</label>
-        <select id="reportFormat" title="PDF は 1 ページ目に図解(主な数字・流れ・比較・時間ごとの話題)が入る。図の材料づくりに要約用の LLM を 1 回使う">
-          <option value="md">.md のみ</option>
-          <option value="pdf">.pdf のみ(図入り)</option>
-          <option value="both">.md と .pdf の両方</option>
-        </select>
+    <main>
+      <div class="col">
+        <section>
+          <h2>
+            いま話している内容 <span id="lastUpdate" class="muted"></span>
+          </h2>
+          <div id="topic" hidden></div>
+          <div id="now">
+            <span class="muted"
+              >「聴講開始」を押すと、ここに現在の話の要約が表示されます。</span
+            >
+          </div>
+          <div id="sumErr" class="err"></div>
+        </section>
+        <section>
+          <h2>一つ前の内容 <span id="prevTime" class="muted"></span></h2>
+          <div id="prevTopic" class="topic" hidden></div>
+          <div id="prev"><span class="muted">まだありません</span></div>
+        </section>
+        <section>
+          <h2>
+            文字起こし
+            <span class="muted"><span id="wordCount">0</span> words</span>
+          </h2>
+          <div id="transcript"></div>
+        </section>
+        <section>
+          <h2>タイムライン</h2>
+          <ul id="timeline"></ul>
+        </section>
       </div>
-    </section>
-    <section>
-      <h2>AIに聞く <span class="muted" id="askHint">今の発表の内容をもとに答えます</span></h2>
-      <form id="askForm" class="askRow">
-        <input id="askInput" placeholder="例: 今の手法は従来法と何が違う?" autocomplete="off">
-        <button id="btnAsk" class="primary" type="submit">検索</button>
-      </form>
-      <div id="askAnswer" class="askAnswer" hidden></div>
-    </section>
-    <section>
-      <h2>自分のメモ <span class="muted">レポートに反映されます</span></h2>
-      <textarea id="notes" placeholder="質問したいこと、自分の研究との関連、気づいたこと…"></textarea>
-    </section>
-    <section>
-      <h2>専門用語</h2>
-      <dl id="terms"></dl>
-    </section>
-  </div>
 
-  <section id="reportSec" style="grid-column: 1 / -1">
-    <h2><span><span id="reportHeading">レポート</span>
-        <span class="muted">完成すると reports/ の中に 1 件ずつフォルダを作り、レポートと文字起こしを自動保存</span></span>
-      <span class="row">
-        <span id="reportStatus" class="muted"></span>
-        <button id="btnCopy" disabled>コピー</button>
-        <button id="btnOpenDir" title="選んでいるレポートのフォルダを開く(選んでいなければ reports/ フォルダ)">保存先を開く</button>
-      </span>
-    </h2>
-    <ul id="jobs"><li class="muted" id="jobsEmpty">まだありません。</li></ul>
-    <!-- 表示専用。直したいときは保存先の .md を開いて直す -->
-    <textarea id="report" spellcheck="false" readonly hidden></textarea>
-  </section>
-</main>
+      <div class="col">
+        <section id="metaSec">
+          <h2>
+            <button
+              id="btnMeta"
+              class="fold"
+              title="開く/たたむ"
+              aria-expanded="true"
+            >
+              <span class="chev">▾</span>
+              <span id="metaHeading">発表情報・設定</span>
+            </button>
+            <span id="metaBrief" class="muted brief"></span>
+          </h2>
+          <div class="meta">
+            <label for="mode">場面</label>
+            <select id="mode">
+              <option value="research">研究発表</option>
+              <option value="lecture">講演・セミナー</option>
+              <option value="meeting">会議</option>
+            </select>
+            <label for="mTitle" id="lblTitle">タイトル</label
+            ><input id="mTitle" placeholder="Paper title" />
+            <label for="mSpeaker" id="lblSpeaker">発表者</label
+            ><input id="mSpeaker" placeholder="Speaker / Affiliation" />
+            <label for="mSession" id="lblSession">セッション</label
+            ><input id="mSession" placeholder="Session / Room" />
+            <label for="speechLang">音声言語</label>
+            <select id="speechLang">
+              <option value="en-US">English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="en-IN">English (India)</option>
+              <option value="ja-JP">日本語</option>
+              <option value="zh-CN">中文</option>
+              <option value="ko-KR">한국어</option>
+              <option value="de-DE">Deutsch</option>
+              <option value="fr-FR">Français</option>
+            </select>
+            <label for="outLang">要約言語</label>
+            <select id="outLang">
+              <option>日本語</option>
+              <option>English</option>
+            </select>
+            <label for="interval">要約間隔</label>
+            <select id="interval">
+              <option value="20">20 秒</option>
+              <option value="30" selected>30 秒</option>
+              <option value="60">60 秒</option>
+              <option value="0">手動のみ</option>
+            </select>
+            <label for="reportFormat">レポート形式</label>
+            <select
+              id="reportFormat"
+              title="PDF は 1 ページ目に図解(主な数字・流れ・比較・時間ごとの話題)が入る。図の材料づくりに要約用の LLM を 1 回使う"
+            >
+              <option value="md">.md のみ</option>
+              <option value="pdf">.pdf のみ(図入り)</option>
+              <option value="both">.md と .pdf の両方</option>
+            </select>
+          </div>
+        </section>
+        <section>
+          <h2>
+            AIに聞く
+            <span class="muted" id="askHint"
+              >今の発表の内容をもとに答えます</span
+            >
+          </h2>
+          <form id="askForm" class="askRow">
+            <input
+              id="askInput"
+              placeholder="例: 今の手法は従来法と何が違う?"
+              autocomplete="off"
+            />
+            <button id="btnAsk" class="primary" type="submit">質問</button>
+          </form>
+          <div id="askAnswer" class="askAnswer" hidden></div>
+        </section>
+        <section>
+          <h2>自分のメモ <span class="muted">レポートに反映されます</span></h2>
+          <textarea
+            id="notes"
+            placeholder="質問したいこと、自分の研究との関連、気づいたこと…"
+          ></textarea>
+        </section>
+        <section>
+          <h2>専門用語</h2>
+          <dl id="terms"></dl>
+        </section>
+      </div>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const STORE_KEY = "presen-report-state-v1";
+      <section id="reportSec" style="grid-column: 1 / -1">
+        <h2>
+          <span
+            ><span id="reportHeading">レポート</span>
+            <span class="muted"
+              >完成すると reports/ の中に 1
+              件ずつフォルダを作り、レポートと文字起こしを自動保存</span
+            ></span
+          >
+          <span class="row">
+            <span id="reportStatus" class="muted"></span>
+            <button id="btnCopy" disabled>コピー</button>
+            <button
+              id="btnOpenDir"
+              title="選んでいるレポートのフォルダを開く(選んでいなければ reports/ フォルダ)"
+            >
+              保存先を開く
+            </button>
+          </span>
+        </h2>
+        <ul id="jobs">
+          <li class="muted" id="jobsEmpty">まだありません。</li>
+        </ul>
+        <!-- 表示専用。直したいときは保存先の .md を開いて直す -->
+        <textarea id="report" spellcheck="false" readonly hidden></textarea>
+      </section>
+    </main>
 
-// ---------- 場面(研究発表 / 講演・セミナー / 会議)ごとの言葉 ----------
-// AI への指示(要約・レポートの構成)はサーバー側で場面ごとに切り替える
-const MODES = {
-  research: {
-    unit: "発表", heading: "発表情報・設定",
-    title: ["タイトル", "Paper title"], speaker: ["発表者", "Speaker / Affiliation"], session: ["セッション・会場", "Session / Venue"],
-    start: "● 聴講開始", active: "聴講中", reportHeading: "レポート", report: "レポート作成 → 次の発表へ",
-    notes: "質問したいこと、自分の研究との関連、気づいたこと…", ask: "例: 今の手法は従来法と何が違う?",
-  },
-  lecture: {
-    unit: "講演", heading: "講演情報・設定",
-    title: ["演題", "Talk title"], speaker: ["講演者", "Speaker"], session: ["イベント・会場", "Event / Venue"],
-    start: "● 聴講開始", active: "聴講中", reportHeading: "レポート", report: "レポート作成 → 次の講演へ",
-    notes: "印象に残ったこと、質問したいこと、気づいたこと…", ask: "例: さっきの事例のポイントは?",
-  },
-  meeting: {
-    unit: "会議", heading: "会議情報・設定",
-    title: ["会議名", "Meeting name"], speaker: ["参加者", "Participants"], session: ["日時・場所", "Date / Place"],
-    start: "● 記録開始", active: "記録中", reportHeading: "議事録", report: "議事録作成 → 次の会議へ",
-    notes: "決まったこと、自分の ToDo、確認したいこと…", ask: "例: さっき決まったことは?",
-  },
-};
-const M = () => MODES[$("mode").value] || MODES.research;
-function applyMode() {
-  const m = M();
-  $("metaHeading").textContent = m.heading;
-  for (const k of ["title", "speaker", "session"]) {
-    const id = "m" + k[0].toUpperCase() + k.slice(1);
-    $("lbl" + k[0].toUpperCase() + k.slice(1)).textContent = m[k][0];
-    $(id).placeholder = m[k][1];
-  }
-  $("notes").placeholder = m.notes;
-  $("askInput").placeholder = m.ask;
-  $("askHint").textContent = `今の${m.unit}の内容をもとに答えます`;
-  $("btnReport").textContent = m.report;
-  $("btnNew").textContent = "破棄して次へ";
-  $("reportHeading").textContent = m.reportHeading;
-  $("jobsEmpty") && ($("jobsEmpty").textContent =
-    `まだありません。${m.unit}が終わったら「${m.report}」を押してください(作成は裏で進みます)。`);
-  if (!state.now) $("now").innerHTML = `<span class="muted">「${m.start.slice(2)}」を押すと、ここに現在の話の要約が表示されます。</span>`;
-  if (typeof updateRecButton === "function") updateRecButton();
-  if (typeof updateMetaBrief === "function") updateMetaBrief();
-}
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const STORE_KEY = "presen-report-state-v1";
 
-// ---------- state ----------
-let state = freshState();
-function freshState() {
-  return { segments: [], keyPoints: [], terms: [], timeline: [], now: "", topic: "",
-           summarizedUpTo: 0, notes: "", meta: { title: "", speaker: "", session: "" } };
-}
-function save() {
-  state.notes = $("notes").value;
-  state.meta = { title: $("mTitle").value, speaker: $("mSpeaker").value, session: $("mSession").value };
-  updateMetaBrief();
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
-  try { localStorage.setItem(STORE_KEY + "-settings", JSON.stringify({
-    speechLang: $("speechLang").value, outLang: $("outLang").value, interval: $("interval").value,
-    reportFormat: $("reportFormat").value,
-    mode: $("mode").value })); } catch {}
-}
-function load() {
-  try { const s = JSON.parse(localStorage.getItem(STORE_KEY)); if (s) state = Object.assign(freshState(), s); } catch {}
-  try {
-    const st = JSON.parse(localStorage.getItem(STORE_KEY + "-settings"));
-    if (st) {
-      $("speechLang").value = st.speechLang; $("outLang").value = st.outLang; $("interval").value = st.interval;
-      if (st.mode && MODES[st.mode]) $("mode").value = st.mode;
-      if (["md", "pdf", "both"].includes(st.reportFormat)) $("reportFormat").value = st.reportFormat;
-    }
-  } catch {}
-  $("notes").value = state.notes; $("mTitle").value = state.meta.title;
-  $("mSpeaker").value = state.meta.speaker; $("mSession").value = state.meta.session;
-  updateMetaBrief();
-  renderAll();
-  applyMode();
-}
-$("mode").onchange = () => { applyMode(); save(); };
-$("reportFormat").onchange = save;
+      // ---------- 場面(研究発表 / 講演・セミナー / 会議)ごとの言葉 ----------
+      // AI への指示(要約・レポートの構成)はサーバー側で場面ごとに切り替える
+      const MODES = {
+        research: {
+          unit: "発表",
+          heading: "発表情報・設定",
+          title: ["タイトル", "Paper title"],
+          speaker: ["発表者", "Speaker / Affiliation"],
+          session: ["セッション・会場", "Session / Venue"],
+          start: "● 聴講開始",
+          active: "聴講中",
+          reportHeading: "レポート",
+          report: "レポート作成 → 次の発表へ",
+          notes: "質問したいこと、自分の研究との関連、気づいたこと…",
+          ask: "例: 今の手法は従来法と何が違う?",
+        },
+        lecture: {
+          unit: "講演",
+          heading: "講演情報・設定",
+          title: ["演題", "Talk title"],
+          speaker: ["講演者", "Speaker"],
+          session: ["イベント・会場", "Event / Venue"],
+          start: "● 聴講開始",
+          active: "聴講中",
+          reportHeading: "レポート",
+          report: "レポート作成 → 次の講演へ",
+          notes: "印象に残ったこと、質問したいこと、気づいたこと…",
+          ask: "例: さっきの事例のポイントは?",
+        },
+        meeting: {
+          unit: "会議",
+          heading: "会議情報・設定",
+          title: ["会議名", "Meeting name"],
+          speaker: ["参加者", "Participants"],
+          session: ["日時・場所", "Date / Place"],
+          start: "● 記録開始",
+          active: "記録中",
+          reportHeading: "議事録",
+          report: "議事録作成 → 次の会議へ",
+          notes: "決まったこと、自分の ToDo、確認したいこと…",
+          ask: "例: さっき決まったことは?",
+        },
+      };
+      const M = () => MODES[$("mode").value] || MODES.research;
+      function applyMode() {
+        const m = M();
+        $("metaHeading").textContent = m.heading;
+        for (const k of ["title", "speaker", "session"]) {
+          const id = "m" + k[0].toUpperCase() + k.slice(1);
+          $("lbl" + k[0].toUpperCase() + k.slice(1)).textContent = m[k][0];
+          $(id).placeholder = m[k][1];
+        }
+        $("notes").placeholder = m.notes;
+        $("askInput").placeholder = m.ask;
+        $("askHint").textContent = `今の${m.unit}の内容をもとに答えます`;
+        $("btnReport").textContent = m.report;
+        $("btnNew").textContent = "破棄して次へ";
+        $("reportHeading").textContent = m.reportHeading;
+        $("jobsEmpty") &&
+          ($("jobsEmpty").textContent =
+            `まだありません。${m.unit}が終わったら「${m.report}」を押してください(作成は裏で進みます)。`);
+        if (!state.now)
+          $("now").innerHTML =
+            `<span class="muted">「${m.start.slice(2)}」を押すと、ここに現在の話の要約が表示されます。</span>`;
+        if (typeof updateRecButton === "function") updateRecButton();
+        if (typeof updateMetaBrief === "function") updateMetaBrief();
+      }
 
-// ---------- rendering ----------
-const fmtTime = (ms) => new Date(ms).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-let interimText = "";
-function renderTranscript() {
-  const el = $("transcript");
-  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  el.textContent = state.segments.map((s) => s.text).join(" ");
-  if (interimText) { const sp = document.createElement("span"); sp.className = "interim"; sp.textContent = " " + interimText; el.appendChild(sp); }
-  if (atBottom) el.scrollTop = el.scrollHeight;
-  $("wordCount").textContent = fullTranscript().split(/\s+/).filter(Boolean).length;
-}
-function renderSummary() {
-  if (state.now) $("now").textContent = state.now;
-  $("topic").hidden = !state.topic; $("topic").textContent = state.topic;
-  // 一つ前の要約(要点は表示しないが、モデルへの引き継ぎとレポートには使う)
-  const prev = state.timeline[state.timeline.length - 2];
-  $("prevTopic").hidden = !(prev && prev.topic); $("prevTopic").textContent = prev ? prev.topic : "";
-  $("prevTime").textContent = prev ? prev.time : "";
-  if (prev) $("prev").textContent = prev.now;
-  else $("prev").innerHTML = '<span class="muted">まだありません</span>';
-  $("terms").innerHTML = "";
-  for (const t of [...state.terms].reverse()) {  // 新しい用語を上に
-    const item = document.createElement("div"); item.className = "term";
-    const dt = document.createElement("dt"); dt.textContent = t.term;
-    const dd = document.createElement("dd"); dd.textContent = t.meaning;
-    item.append(dt, dd);
-    $("terms").appendChild(item);
-  }
-  fitTerms();
-  $("terms").scrollTop = 0;  // 更新されたら一番新しい用語を見せる
-  $("timeline").innerHTML = "";
-  for (const t of [...state.timeline].reverse()) {
-    const li = document.createElement("li");
-    const tm = document.createElement("time"); tm.textContent = t.time;
-    const b = document.createElement("b"); b.textContent = t.topic ? t.topic + ": " : "";
-    li.append(tm, b, document.createTextNode(t.now));
-    $("timeline").appendChild(li);
-  }
-}
-// 専門用語は一度に 3 つまで見せ、それより古いものはスクロールで見る
-// (説明の長さで高さが変わるので、上から 3 つの実際の高さに合わせる)
-const TERMS_VISIBLE = 3;
-function fitTerms() {
-  const box = $("terms"), items = [...box.children].slice(0, TERMS_VISIBLE);
-  box.style.maxHeight = box.children.length > TERMS_VISIBLE
-    ? items.reduce((h, el) => h + el.offsetHeight, 0) + "px" : "";
-}
-window.addEventListener("resize", fitTerms);
-function renderAll() { renderTranscript(); renderSummary(); }
-function fullTranscript() { return state.segments.map((s) => s.text).join(" "); }
+      // ---------- state ----------
+      let state = freshState();
+      function freshState() {
+        return {
+          segments: [],
+          keyPoints: [],
+          terms: [],
+          timeline: [],
+          now: "",
+          topic: "",
+          summarizedUpTo: 0,
+          notes: "",
+          meta: { title: "", speaker: "", session: "" },
+        };
+      }
+      function save() {
+        state.notes = $("notes").value;
+        state.meta = {
+          title: $("mTitle").value,
+          speaker: $("mSpeaker").value,
+          session: $("mSession").value,
+        };
+        updateMetaBrief();
+        try {
+          localStorage.setItem(STORE_KEY, JSON.stringify(state));
+        } catch {}
+        try {
+          localStorage.setItem(
+            STORE_KEY + "-settings",
+            JSON.stringify({
+              speechLang: $("speechLang").value,
+              outLang: $("outLang").value,
+              interval: $("interval").value,
+              reportFormat: $("reportFormat").value,
+              mode: $("mode").value,
+            }),
+          );
+        } catch {}
+      }
+      function load() {
+        try {
+          const s = JSON.parse(localStorage.getItem(STORE_KEY));
+          if (s) state = Object.assign(freshState(), s);
+        } catch {}
+        try {
+          const st = JSON.parse(localStorage.getItem(STORE_KEY + "-settings"));
+          if (st) {
+            $("speechLang").value = st.speechLang;
+            $("outLang").value = st.outLang;
+            $("interval").value = st.interval;
+            if (st.mode && MODES[st.mode]) $("mode").value = st.mode;
+            if (["md", "pdf", "both"].includes(st.reportFormat))
+              $("reportFormat").value = st.reportFormat;
+          }
+        } catch {}
+        $("notes").value = state.notes;
+        $("mTitle").value = state.meta.title;
+        $("mSpeaker").value = state.meta.speaker;
+        $("mSession").value = state.meta.session;
+        updateMetaBrief();
+        renderAll();
+        applyMode();
+      }
+      $("mode").onchange = () => {
+        applyMode();
+        save();
+      };
+      $("reportFormat").onchange = save;
 
-// ---------- speech recognition ----------
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-// 方針:
-// - 認識インスタンスは毎回作り直し、古いものは abort して、その後のイベントは無視する(r !== rec)
-// - 切れたら聴講中である限り無期限に再開する(待ち時間は 0.3 → 1 → 2 → 5 秒)
-// - 見張り: 開始命令から 10 秒たっても始まらない/60 秒何も認識しない ときは作り直す
-// - 画面の「聴講中」は、実際に認識が動いている(onstart 済み)ときだけ出す
-let rec = null, listening = false, recActive = false;
-let listenStart = 0, sessionStart = 0, startCalledAt = 0, lastResultAt = 0, lastFinalAt = 0;
-let restarts = 0, backoff = 0, restartTimer = null, svcErrors = [];
-// NOFINAL: 途中結果は届くのに確定文が出ない状態(停止も効かずに固まることがある)
-const NOSTART_MS = 10_000, SILENT_MS = 60_000, NOFINAL_MS = 30_000;
+      // ---------- rendering ----------
+      const fmtTime = (ms) =>
+        new Date(ms).toLocaleTimeString("ja-JP", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+      let interimText = "";
+      function renderTranscript() {
+        const el = $("transcript");
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        el.textContent = state.segments.map((s) => s.text).join(" ");
+        if (interimText) {
+          const sp = document.createElement("span");
+          sp.className = "interim";
+          sp.textContent = " " + interimText;
+          el.appendChild(sp);
+        }
+        if (atBottom) el.scrollTop = el.scrollHeight;
+        $("wordCount").textContent = fullTranscript()
+          .split(/\s+/)
+          .filter(Boolean).length;
+      }
+      function renderSummary() {
+        if (state.now) $("now").textContent = state.now;
+        $("topic").hidden = !state.topic;
+        $("topic").textContent = state.topic;
+        // 一つ前の要約(要点は表示しないが、モデルへの引き継ぎとレポートには使う)
+        const prev = state.timeline[state.timeline.length - 2];
+        $("prevTopic").hidden = !(prev && prev.topic);
+        $("prevTopic").textContent = prev ? prev.topic : "";
+        $("prevTime").textContent = prev ? prev.time : "";
+        if (prev) $("prev").textContent = prev.now;
+        else $("prev").innerHTML = '<span class="muted">まだありません</span>';
+        $("terms").innerHTML = "";
+        for (const t of [...state.terms].reverse()) {
+          // 新しい用語を上に
+          const item = document.createElement("div");
+          item.className = "term";
+          const dt = document.createElement("dt");
+          dt.textContent = t.term;
+          const dd = document.createElement("dd");
+          dd.textContent = t.meaning;
+          item.append(dt, dd);
+          $("terms").appendChild(item);
+        }
+        fitTerms();
+        $("terms").scrollTop = 0; // 更新されたら一番新しい用語を見せる
+        $("timeline").innerHTML = "";
+        for (const t of [...state.timeline].reverse()) {
+          const li = document.createElement("li");
+          const tm = document.createElement("time");
+          tm.textContent = t.time;
+          const b = document.createElement("b");
+          b.textContent = t.topic ? t.topic + ": " : "";
+          li.append(tm, b, document.createTextNode(t.now));
+          $("timeline").appendChild(li);
+        }
+      }
+      // 専門用語は一度に 3 つまで見せ、それより古いものはスクロールで見る
+      // (説明の長さで高さが変わるので、上から 3 つの実際の高さに合わせる)
+      const TERMS_VISIBLE = 3;
+      function fitTerms() {
+        const box = $("terms"),
+          items = [...box.children].slice(0, TERMS_VISIBLE);
+        box.style.maxHeight =
+          box.children.length > TERMS_VISIBLE
+            ? items.reduce((h, el) => h + el.offsetHeight, 0) + "px"
+            : "";
+      }
+      window.addEventListener("resize", fitTerms);
+      function renderAll() {
+        renderTranscript();
+        renderSummary();
+      }
+      function fullTranscript() {
+        return state.segments.map((s) => s.text).join(" ");
+      }
 
-function setStatus(text, on) { $("statusText").textContent = text; $("dot").classList.toggle("on", !!on); }
-function setListeningStatus() {
-  let s = M().active + "(" + $("speechLang").value + ")";
-  if (restarts) s += ` · 自動再接続 ${restarts} 回`;
-  setStatus(s, true);  // エラーの種類はサーバーのログ(logs/speech.log)にだけ残す
-}
-// 原因調査用: 音声認識のイベントをサーバーの logs/speech.log に残す
-function logSpeech(ev, extra = {}) {
-  const now = Date.now();
-  fetch("/api/log", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ev, ...extra, active: recActive, visible: document.visibilityState,
-                           session_sec: sessionStart ? Math.round((now - sessionStart) / 1000) : null,
-                           silent_sec: Math.round((now - lastResultAt) / 1000),
-                           nofinal_sec: Math.round((now - lastFinalAt) / 1000), interim_len: interimText.length,
-                           total_sec: Math.round((now - listenStart) / 1000), restarts }) }).catch(() => {});
-}
-function flushInterim() {  // 確定前に切れた途中の文は捨てずに残す
-  if (interimText) { state.segments.push({ t: Date.now(), text: interimText }); interimText = ""; renderTranscript(); save(); }
-}
+      // ---------- speech recognition ----------
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      // 方針:
+      // - 認識インスタンスは毎回作り直し、古いものは abort して、その後のイベントは無視する(r !== rec)
+      // - 切れたら聴講中である限り無期限に再開する(待ち時間は 0.3 → 1 → 2 → 5 秒)
+      // - 見張り: 開始命令から 10 秒たっても始まらない/60 秒何も認識しない ときは作り直す
+      // - 画面の「聴講中」は、実際に認識が動いている(onstart 済み)ときだけ出す
+      let rec = null,
+        listening = false,
+        recActive = false;
+      let listenStart = 0,
+        sessionStart = 0,
+        startCalledAt = 0,
+        lastResultAt = 0,
+        lastFinalAt = 0;
+      let restarts = 0,
+        backoff = 0,
+        restartTimer = null,
+        svcErrors = [];
+      // NOFINAL: 途中結果は届くのに確定文が出ない状態(停止も効かずに固まることがある)
+      const NOSTART_MS = 10_000,
+        SILENT_MS = 60_000,
+        NOFINAL_MS = 30_000;
 
-function newRecognizer() {
-  const r = new SR();
-  r.lang = $("speechLang").value;
-  r.continuous = true;
-  r.interimResults = true;
-  r.onstart = () => {
-    if (r !== rec) return;
-    recActive = true; sessionStart = Date.now(); backoff = 0;
-    logSpeech("start");
-    setListeningStatus();
-  };
-  r.onresult = (e) => {
-    if (r !== rec) return;
-    lastResultAt = Date.now();
-    let interim = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const x = e.results[i];
-      if (x.isFinal) {
-        const text = x[0].transcript.trim();
-        if (text) { state.segments.push({ t: Date.now(), text }); lastFinalAt = Date.now(); }
-      } else interim += x[0].transcript;
-    }
-    interimText = interim.trim();
-    renderTranscript();
-    save();
-  };
-  r.onerror = (e) => {
-    if (r !== rec) return;
-    logSpeech("error", { error: e.error, message: e.message || "" });
-    if (e.error === "not-allowed") {
-      fatal("マイクの使用が許可されていません(アドレスバーのマイク設定を確認)");
-    } else if (e.error === "service-not-allowed") {
-      // 一時的なこともあるので、1 分に 3 回続いたときだけ諦める
-      const now = Date.now();
-      svcErrors = svcErrors.filter((t) => now - t < 60_000).concat(now);
-      if (svcErrors.length >= 3) fatal("音声認識サービスを使えません(ネット接続・Edge を確認)");
-    }
-  };
-  r.onend = () => {
-    if (r !== rec) return;
-    recActive = false;
-    logSpeech("end");
-    flushInterim();
-    if (listening) scheduleRestart();
-  };
-  return r;
-}
-// 新しいインスタンスで認識を始める(古いものは abort し、以後のイベントは無視される)
-function launch() {
-  clearTimeout(restartTimer); restartTimer = null;
-  if (rec) { const old = rec; rec = null; recActive = false; try { old.abort(); } catch {} }
-  rec = newRecognizer();
-  startCalledAt = lastResultAt = lastFinalAt = Date.now();
-  try { rec.start(); }
-  catch (e) { logSpeech("start-failed", { message: String(e) }); scheduleRestart(); }
-}
-function scheduleRestart() {
-  clearTimeout(restartTimer);
-  const delay = [300, 1000, 2000, 5000][Math.min(backoff, 3)];
-  backoff++; restarts++;
-  setStatus(`再接続中…(自動再接続 ${restarts} 回)`, true);
-  restartTimer = setTimeout(() => { restartTimer = null; if (listening) launch(); }, delay);
-}
-function fatal(msg) {
-  logSpeech("fatal", { message: msg });
-  listening = false; recActive = false;
-  clearTimeout(restartTimer); restartTimer = null;
-  if (rec) { const old = rec; rec = null; try { old.abort(); } catch {} }
-  setStatus(msg, false); updateRecButton(); clearTimeout(summaryTimer);
-}
-// 見張り: エラーも終了も来ないまま固まった状態を検出して作り直す
-setInterval(() => {
-  if (!listening || restartTimer) return;
-  const now = Date.now();
-  if (!recActive && now - startCalledAt > NOSTART_MS) { logSpeech("watchdog-nostart"); restarts++; launch(); }
-  else if (recActive && now - lastResultAt > SILENT_MS) { logSpeech("watchdog-silent"); restarts++; launch(); }
-  else if (recActive && now - lastFinalAt > NOFINAL_MS && now - lastResultAt < 5000) {
-    // 途中結果だけが続いて確定しない: 途中の文を残してから作り直す
-    logSpeech("watchdog-nofinal"); flushInterim(); restarts++; launch();
-  }
-}, 5000);
-// 画面が隠れた/戻った・ネットが切れた/戻ったときも記録し、戻ったときに止まっていれば即再開
-document.addEventListener("visibilitychange", () => {
-  if (!listening) return;
-  logSpeech("visibility");
-  if (document.visibilityState === "visible" && !recActive) launch();
-});
-window.addEventListener("offline", () => { if (listening) logSpeech("offline"); });
-window.addEventListener("online", () => { if (listening) { logSpeech("online"); if (!recActive) launch(); } });
+      function setStatus(text, on) {
+        $("statusText").textContent = text;
+        $("dot").classList.toggle("on", !!on);
+      }
+      function setListeningStatus() {
+        let s = M().active + "(" + $("speechLang").value + ")";
+        if (restarts) s += ` · 自動再接続 ${restarts} 回`;
+        setStatus(s, true); // エラーの種類はサーバーのログ(logs/speech.log)にだけ残す
+      }
+      // 原因調査用: 音声認識のイベントをサーバーの logs/speech.log に残す
+      function logSpeech(ev, extra = {}) {
+        const now = Date.now();
+        fetch("/api/log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ev,
+            ...extra,
+            active: recActive,
+            visible: document.visibilityState,
+            session_sec: sessionStart
+              ? Math.round((now - sessionStart) / 1000)
+              : null,
+            silent_sec: Math.round((now - lastResultAt) / 1000),
+            nofinal_sec: Math.round((now - lastFinalAt) / 1000),
+            interim_len: interimText.length,
+            total_sec: Math.round((now - listenStart) / 1000),
+            restarts,
+          }),
+        }).catch(() => {});
+      }
+      function flushInterim() {
+        // 確定前に切れた途中の文は捨てずに残す
+        if (interimText) {
+          state.segments.push({ t: Date.now(), text: interimText });
+          interimText = "";
+          renderTranscript();
+          save();
+        }
+      }
 
-function startRec() {
-  if (!SR) { alert("このブラウザは音声認識に対応していません。Edge で開いてください。"); return; }
-  if (rec) logSpeech("user-start");  // 手動で再開した(直前の状態を残す)
-  listening = true; listenStart = Date.now(); restarts = 0; backoff = 0; svcErrors = [];
-  setStatus("開始中…", true); updateRecButton();
-  launch();
-  scheduleSummary();
-}
-function stopRec() {
-  logSpeech("user-stop");  // 止めたときの状態(無音秒数・確定なし秒数・途中文の長さ)を残す
-  listening = false;
-  clearTimeout(restartTimer); restartTimer = null;
-  if (rec) { try { rec.stop(); } catch {} }  // 最後の確定結果は onend までに届く
-  setStatus("停止中", false); updateRecButton(); clearTimeout(summaryTimer);
-}
-function updateRecButton() {
-  $("btnRec").textContent = listening ? "■ 停止" : M().start;
-  $("btnRec").className = listening ? "rec" : "primary";
-}
-$("btnRec").onclick = () => (listening ? stopRec() : startRec());
-$("speechLang").onchange = () => { save(); if (listening) launch(); };
+      function newRecognizer() {
+        const r = new SR();
+        r.lang = $("speechLang").value;
+        r.continuous = true;
+        r.interimResults = true;
+        r.onstart = () => {
+          if (r !== rec) return;
+          recActive = true;
+          sessionStart = Date.now();
+          backoff = 0;
+          logSpeech("start");
+          setListeningStatus();
+        };
+        r.onresult = (e) => {
+          if (r !== rec) return;
+          lastResultAt = Date.now();
+          let interim = "";
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const x = e.results[i];
+            if (x.isFinal) {
+              const text = x[0].transcript.trim();
+              if (text) {
+                state.segments.push({ t: Date.now(), text });
+                lastFinalAt = Date.now();
+              }
+            } else interim += x[0].transcript;
+          }
+          interimText = interim.trim();
+          renderTranscript();
+          save();
+        };
+        r.onerror = (e) => {
+          if (r !== rec) return;
+          logSpeech("error", { error: e.error, message: e.message || "" });
+          if (e.error === "not-allowed") {
+            fatal(
+              "マイクの使用が許可されていません(アドレスバーのマイク設定を確認)",
+            );
+          } else if (e.error === "service-not-allowed") {
+            // 一時的なこともあるので、1 分に 3 回続いたときだけ諦める
+            const now = Date.now();
+            svcErrors = svcErrors.filter((t) => now - t < 60_000).concat(now);
+            if (svcErrors.length >= 3)
+              fatal("音声認識サービスを使えません(ネット接続・Edge を確認)");
+          }
+        };
+        r.onend = () => {
+          if (r !== rec) return;
+          recActive = false;
+          logSpeech("end");
+          flushInterim();
+          if (listening) scheduleRestart();
+        };
+        return r;
+      }
+      // 新しいインスタンスで認識を始める(古いものは abort し、以後のイベントは無視される)
+      function launch() {
+        clearTimeout(restartTimer);
+        restartTimer = null;
+        if (rec) {
+          const old = rec;
+          rec = null;
+          recActive = false;
+          try {
+            old.abort();
+          } catch {}
+        }
+        rec = newRecognizer();
+        startCalledAt = lastResultAt = lastFinalAt = Date.now();
+        try {
+          rec.start();
+        } catch (e) {
+          logSpeech("start-failed", { message: String(e) });
+          scheduleRestart();
+        }
+      }
+      function scheduleRestart() {
+        clearTimeout(restartTimer);
+        const delay = [300, 1000, 2000, 5000][Math.min(backoff, 3)];
+        backoff++;
+        restarts++;
+        setStatus(`再接続中…(自動再接続 ${restarts} 回)`, true);
+        restartTimer = setTimeout(() => {
+          restartTimer = null;
+          if (listening) launch();
+        }, delay);
+      }
+      function fatal(msg) {
+        logSpeech("fatal", { message: msg });
+        listening = false;
+        recActive = false;
+        clearTimeout(restartTimer);
+        restartTimer = null;
+        if (rec) {
+          const old = rec;
+          rec = null;
+          try {
+            old.abort();
+          } catch {}
+        }
+        setStatus(msg, false);
+        updateRecButton();
+        clearTimeout(summaryTimer);
+      }
+      // 見張り: エラーも終了も来ないまま固まった状態を検出して作り直す
+      setInterval(() => {
+        if (!listening || restartTimer) return;
+        const now = Date.now();
+        if (!recActive && now - startCalledAt > NOSTART_MS) {
+          logSpeech("watchdog-nostart");
+          restarts++;
+          launch();
+        } else if (recActive && now - lastResultAt > SILENT_MS) {
+          logSpeech("watchdog-silent");
+          restarts++;
+          launch();
+        } else if (
+          recActive &&
+          now - lastFinalAt > NOFINAL_MS &&
+          now - lastResultAt < 5000
+        ) {
+          // 途中結果だけが続いて確定しない: 途中の文を残してから作り直す
+          logSpeech("watchdog-nofinal");
+          flushInterim();
+          restarts++;
+          launch();
+        }
+      }, 5000);
+      // 画面が隠れた/戻った・ネットが切れた/戻ったときも記録し、戻ったときに止まっていれば即再開
+      document.addEventListener("visibilitychange", () => {
+        if (!listening) return;
+        logSpeech("visibility");
+        if (document.visibilityState === "visible" && !recActive) launch();
+      });
+      window.addEventListener("offline", () => {
+        if (listening) logSpeech("offline");
+      });
+      window.addEventListener("online", () => {
+        if (listening) {
+          logSpeech("online");
+          if (!recActive) launch();
+        }
+      });
 
-// ---------- live summary ----------
-let summaryTimer = null, summarizing = false;
-const NEW_MAX_CHARS = 5000, CONTEXT_MAX_CHARS = 800;  // context: 直前 30 秒ほど(つながり理解用)
+      function startRec() {
+        if (!SR) {
+          alert(
+            "このブラウザは音声認識に対応していません。Edge で開いてください。",
+          );
+          return;
+        }
+        if (rec) logSpeech("user-start"); // 手動で再開した(直前の状態を残す)
+        listening = true;
+        listenStart = Date.now();
+        restarts = 0;
+        backoff = 0;
+        svcErrors = [];
+        setStatus("開始中…", true);
+        updateRecButton();
+        launch();
+        scheduleSummary();
+      }
+      function stopRec() {
+        logSpeech("user-stop"); // 止めたときの状態(無音秒数・確定なし秒数・途中文の長さ)を残す
+        listening = false;
+        clearTimeout(restartTimer);
+        restartTimer = null;
+        if (rec) {
+          try {
+            rec.stop();
+          } catch {}
+        } // 最後の確定結果は onend までに届く
+        setStatus("停止中", false);
+        updateRecButton();
+        clearTimeout(summaryTimer);
+      }
+      function updateRecButton() {
+        $("btnRec").textContent = listening ? "■ 停止" : M().start;
+        $("btnRec").className = listening ? "rec" : "primary";
+      }
+      $("btnRec").onclick = () => (listening ? stopRec() : startRec());
+      $("speechLang").onchange = () => {
+        save();
+        if (listening) launch();
+      };
 
-function scheduleSummary() {
-  clearTimeout(summaryTimer);
-  const sec = Number($("interval").value);
-  if (!listening || !sec) return;
-  summaryTimer = setTimeout(async () => { await summarize(false); scheduleSummary(); }, sec * 1000);
-}
-$("interval").onchange = () => { save(); scheduleSummary(); };
+      // ---------- live summary ----------
+      let summaryTimer = null,
+        summarizing = false;
+      const NEW_MAX_CHARS = 5000,
+        CONTEXT_MAX_CHARS = 800; // context: 直前 30 秒ほど(つながり理解用)
 
-async function summarize(force) {
-  if (summarizing) return;
-  const segs = state.segments;
-  const newWords = segs.slice(state.summarizedUpTo).map((s) => s.text).join(" ").split(/\s+/).filter(Boolean).length;
-  if (!segs.length || (!force && newWords < 12)) return;
+      function scheduleSummary() {
+        clearTimeout(summaryTimer);
+        const sec = Number($("interval").value);
+        if (!listening || !sec) return;
+        summaryTimer = setTimeout(async () => {
+          await summarize(false);
+          scheduleSummary();
+        }, sec * 1000);
+      }
+      $("interval").onchange = () => {
+        save();
+        scheduleSummary();
+      };
 
-  // 要約するのは前回以降に新しく話された部分だけ(前回分を毎回入れると、要約が前後で重複する)
-  let newText = segs.slice(state.summarizedUpTo).map((s) => s.text).join(" ");
-  if (newText.length > NEW_MAX_CHARS) newText = newText.slice(-NEW_MAX_CHARS);
-  const context = segs.slice(0, state.summarizedUpTo).map((s) => s.text).join(" ").slice(-CONTEXT_MAX_CHARS);
-  const upTo = segs.length, talk = state;
+      async function summarize(force) {
+        if (summarizing) return;
+        const segs = state.segments;
+        const newWords = segs
+          .slice(state.summarizedUpTo)
+          .map((s) => s.text)
+          .join(" ")
+          .split(/\s+/)
+          .filter(Boolean).length;
+        if (!segs.length || (!force && newWords < 12)) return;
 
-  summarizing = true; $("btnSummary").disabled = true; $("sumErr").textContent = "";
-  $("lastUpdate").textContent = "要約中…";
-  try {
-    const res = await fetch("/api/summary", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ new: newText, context, previous_now: state.now,
-                             title: $("mTitle").value, lang: $("outLang").value, mode: $("mode").value }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    if (state !== talk) return;  // 待っている間に次の発表へ切り替わった
-    state.now = data.now; state.topic = data.topic;
-    // 用語は累積(古い順に保持。もう一度出てきた用語は位置も説明も変えない)
-    const map = new Map(state.terms.map((t) => [t.term.toLowerCase(), t]));
-    for (const t of data.terms) if (!map.has(t.term.toLowerCase())) map.set(t.term.toLowerCase(), t);
-    state.terms = [...map.values()].slice(-20);
-    const time = fmtTime(Date.now());
-    state.timeline.push({ time, topic: data.topic, now: data.now });
-    state.summarizedUpTo = upTo;
-    $("lastUpdate").textContent = time + " 更新";
-    renderSummary(); save();
-  } catch (e) {
-    $("sumErr").textContent = "要約に失敗: " + e.message; $("lastUpdate").textContent = "";
-  } finally {
-    summarizing = false; $("btnSummary").disabled = false;
-  }
-}
-$("btnSummary").onclick = () => summarize(true);
+        // 要約するのは前回以降に新しく話された部分だけ(前回分を毎回入れると、要約が前後で重複する)
+        let newText = segs
+          .slice(state.summarizedUpTo)
+          .map((s) => s.text)
+          .join(" ");
+        if (newText.length > NEW_MAX_CHARS)
+          newText = newText.slice(-NEW_MAX_CHARS);
+        const context = segs
+          .slice(0, state.summarizedUpTo)
+          .map((s) => s.text)
+          .join(" ")
+          .slice(-CONTEXT_MAX_CHARS);
+        const upTo = segs.length,
+          talk = state;
 
-// ---------- 発表の切り替え ----------
-// 聴講(音声認識)は止めずに、画面と状態だけ次の発表用に空にする
-function resetTalk() {
-  state = freshState();
-  $("notes").value = ""; $("mTitle").value = ""; $("mSpeaker").value = ""; $("mSession").value = "";
-  $("now").innerHTML = `<span class="muted">次の${M().unit}を待っています…</span>`;
-  $("lastUpdate").textContent = ""; $("sumErr").textContent = "";
-  renderAll(); save(); scheduleSummary();
-}
+        summarizing = true;
+        $("btnSummary").disabled = true;
+        $("sumErr").textContent = "";
+        $("lastUpdate").textContent = "要約中…";
+        try {
+          const res = await fetch("/api/summary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              new: newText,
+              context,
+              previous_now: state.now,
+              title: $("mTitle").value,
+              lang: $("outLang").value,
+              mode: $("mode").value,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || res.statusText);
+          if (state !== talk) return; // 待っている間に次の発表へ切り替わった
+          state.now = data.now;
+          state.topic = data.topic;
+          // 用語は累積(古い順に保持。もう一度出てきた用語は位置も説明も変えない)
+          const map = new Map(
+            state.terms.map((t) => [t.term.toLowerCase(), t]),
+          );
+          for (const t of data.terms)
+            if (!map.has(t.term.toLowerCase()))
+              map.set(t.term.toLowerCase(), t);
+          state.terms = [...map.values()].slice(-20);
+          const time = fmtTime(Date.now());
+          state.timeline.push({ time, topic: data.topic, now: data.now });
+          state.summarizedUpTo = upTo;
+          $("lastUpdate").textContent = time + " 更新";
+          renderSummary();
+          save();
+        } catch (e) {
+          $("sumErr").textContent = "要約に失敗: " + e.message;
+          $("lastUpdate").textContent = "";
+        } finally {
+          summarizing = false;
+          $("btnSummary").disabled = false;
+        }
+      }
+      $("btnSummary").onclick = () => summarize(true);
 
-// ---------- report(サーバー側で裏で作成) ----------
-let jobs = [], viewId = null, viewStatus = null, pollTimer = null;
-async function submitReport(s) {
-  const payload = {
-    lang: $("outLang").value,
-    mode: $("mode").value, title: s.meta.title, format: $("reportFormat").value,
-    // メタ情報の見出しは場面に合わせる(例: 会議なら「会議名」「参加者」)
-    meta: { [M().title[0]]: s.meta.title, [M().speaker[0]]: s.meta.speaker, [M().session[0]]: s.meta.session,
-            "記録日時": s.segments.length ? new Date(s.segments[0].t).toLocaleString("ja-JP") : "" },
-    notes: s.notes, timeline: s.timeline,
-    transcript: s.segments.map((x) => x.text).join(" "),
-  };
-  try {
-    await postReport(payload);
-    return true;
-  } catch (e) {
-    $("sumErr").textContent = "レポート作成を開始できませんでした(server.py が動いているか確認): " + e.message;
-    return false;
-  }
-}
-// レポート作成を依頼し、失敗時に再作成できるよう依頼内容をブラウザに取っておく
-async function postReport(payload) {
-  const res = await fetch("/api/report", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  const { id } = await res.json();
-  const store = loadJSON("-payloads", {});
-  store[id] = payload;
-  const ids = Object.keys(store);
-  for (const old of ids.slice(0, Math.max(0, ids.length - PAYLOAD_KEEP))) delete store[old];
-  saveJSON("-payloads", store);
-  pollJobs();
-  return id;
-}
-const PAYLOAD_KEEP = 15;  // 再作成用に取っておく依頼の数(新しいものから)
-function loadJSON(suffix, fallback) {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY + suffix)) || fallback; } catch { return fallback; }
-}
-function saveJSON(suffix, v) {
-  try { localStorage.setItem(STORE_KEY + suffix, JSON.stringify(v)); } catch {}
-}
-// 失敗したレポートを同じ内容で作り直す(新しい行として一覧に出て、失敗した行は隠す)
-async function retryJob(id, btn) {
-  const payload = loadJSON("-payloads", {})[id];
-  if (!payload) return;
-  btn.disabled = true; btn.textContent = "依頼中…";
-  try {
-    await postReport(payload);
-    saveJSON("-retried", [...loadJSON("-retried", []), id].slice(-50));
-    if (viewId === id) viewId = null;
-    renderJobs();
-  } catch (e) {
-    btn.disabled = false; btn.textContent = "再作成";
-    alert("再作成を開始できませんでした(server.py が動いているか確認): " + e.message);
-  }
-}
-$("btnReport").onclick = async () => {
-  if (!state.segments.length && !$("notes").value.trim()) { alert("文字起こしもメモもまだありません。"); return; }
-  save();
-  $("btnReport").disabled = true;
-  const ok = await submitReport(state);  // 受け付けられなかったときは今の発表を消さない
-  $("btnReport").disabled = false;
-  if (!ok) { alert($("sumErr").textContent); return; }
-  resetTalk();
-};
+      // ---------- 発表の切り替え ----------
+      // 聴講(音声認識)は止めずに、画面と状態だけ次の発表用に空にする
+      function resetTalk() {
+        state = freshState();
+        $("notes").value = "";
+        $("mTitle").value = "";
+        $("mSpeaker").value = "";
+        $("mSession").value = "";
+        $("now").innerHTML =
+          `<span class="muted">次の${M().unit}を待っています…</span>`;
+        $("lastUpdate").textContent = "";
+        $("sumErr").textContent = "";
+        renderAll();
+        save();
+        scheduleSummary();
+      }
 
-async function pollJobs() {
-  clearTimeout(pollTimer);
-  try {
-    jobs = await (await fetch("/api/jobs")).json();
-    renderJobs();
-    if (viewId) await showJob(viewId, false);
-  } catch {}
-  if (jobs.some((j) => j.status === "running")) pollTimer = setTimeout(pollJobs, 2000);
-}
-function renderJobs() {
-  const ul = $("jobs");
-  if (!jobs.length) return;
-  ul.innerHTML = "";
-  const label = { running: "作成中…", done: "✓ 保存済み", error: "失敗" };
-  const retried = new Set(loadJSON("-retried", [])), payloads = loadJSON("-payloads", {});
-  for (const j of jobs) {
-    if (j.status === "error" && retried.has(j.id)) continue;  // 再作成済みの失敗は隠す
-    const li = document.createElement("li"), b = document.createElement("button");
-    b.className = "job" + (j.id === viewId ? " sel" : "");
-    const badge = document.createElement("span"); badge.className = "badge " + j.status; badge.textContent = label[j.status];
-    const tm = document.createElement("span"); tm.className = "muted"; tm.textContent = j.started;
-    const extra = j.error ? "  — " + j.error : j.status === "running" && j.stage ? `  (${j.stage})`
-      : j.status === "done" ? `  [${(j.files || []).map((f) => f.split(".").pop()).join("・")}]${j.note ? " ⚠ " + j.note : ""}` : "";
-    const ti = document.createElement("span"); ti.textContent = j.title + extra;
-    b.append(badge, tm, ti);
-    b.onclick = () => showJob(j.id, true);
-    li.appendChild(b);
-    if (j.status === "error") {
-      const r = document.createElement("button"); r.className = "primary retry"; r.textContent = "再作成";
-      if (payloads[j.id]) r.onclick = () => retryJob(j.id, r);
-      else { r.disabled = true; r.title = "依頼内容が残っていないため再作成できません(文字起こしは reports/ の各フォルダの transcript.txt に残っています)"; }
-      li.appendChild(r);
-    }
-    ul.appendChild(li);
-  }
-}
-async function showJob(id, userClick) {
-  const res = await fetch("/api/jobs/" + encodeURIComponent(id));
-  if (!res.ok) return;
-  const j = await res.json();
-  const ta = $("report");
-  // 作成中は届いた分を流し込む(作成中→完了の最後の 1 回まで反映する)
-  if (userClick || viewStatus === "running") {
-    const atBottom = ta.scrollHeight - ta.scrollTop - ta.clientHeight < 40;
-    ta.value = j.text;
-    if (atBottom) ta.scrollTop = ta.scrollHeight;
-  }
-  viewStatus = j.status;
-  if (userClick) { viewId = id; renderJobs(); }
-  ta.hidden = false;
-  $("btnCopy").disabled = false;
-  const files = (j.files || []).join("・");
-  $("reportStatus").textContent = {
-    running: `${j.stage || "作成中"}…(完成すると自動保存)`,
-    done: `✓ reports/${j.id}/ に保存済み(${files})` + (j.note ? ` ⚠ ${j.note}` : ""),
-    error: `作成に失敗(文字起こしは reports/${j.id}/transcript.txt に保存済み)`,
-  }[j.status];
-  if (j.status === "running" && userClick) pollJobs();
-}
-$("btnCopy").onclick = () => navigator.clipboard.writeText($("report").value);
-// 選んでいるレポートがあればそのフォルダ、なければ reports/ を開く
-$("btnOpenDir").onclick = () => fetch("/api/open-reports", {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: viewId }),
-}).catch(() => {});
+      // ---------- report(サーバー側で裏で作成) ----------
+      let jobs = [],
+        viewId = null,
+        viewStatus = null,
+        pollTimer = null;
+      async function submitReport(s) {
+        const payload = {
+          lang: $("outLang").value,
+          mode: $("mode").value,
+          title: s.meta.title,
+          format: $("reportFormat").value,
+          // メタ情報の見出しは場面に合わせる(例: 会議なら「会議名」「参加者」)
+          meta: {
+            [M().title[0]]: s.meta.title,
+            [M().speaker[0]]: s.meta.speaker,
+            [M().session[0]]: s.meta.session,
+            記録日時: s.segments.length
+              ? new Date(s.segments[0].t).toLocaleString("ja-JP")
+              : "",
+          },
+          notes: s.notes,
+          timeline: s.timeline,
+          transcript: s.segments.map((x) => x.text).join(" "),
+        };
+        try {
+          await postReport(payload);
+          return true;
+        } catch (e) {
+          $("sumErr").textContent =
+            "レポート作成を開始できませんでした(server.py が動いているか確認): " +
+            e.message;
+          return false;
+        }
+      }
+      // レポート作成を依頼し、失敗時に再作成できるよう依頼内容をブラウザに取っておく
+      async function postReport(payload) {
+        const res = await fetch("/api/report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const { id } = await res.json();
+        const store = loadJSON("-payloads", {});
+        store[id] = payload;
+        const ids = Object.keys(store);
+        for (const old of ids.slice(0, Math.max(0, ids.length - PAYLOAD_KEEP)))
+          delete store[old];
+        saveJSON("-payloads", store);
+        pollJobs();
+        return id;
+      }
+      const PAYLOAD_KEEP = 15; // 再作成用に取っておく依頼の数(新しいものから)
+      function loadJSON(suffix, fallback) {
+        try {
+          return (
+            JSON.parse(localStorage.getItem(STORE_KEY + suffix)) || fallback
+          );
+        } catch {
+          return fallback;
+        }
+      }
+      function saveJSON(suffix, v) {
+        try {
+          localStorage.setItem(STORE_KEY + suffix, JSON.stringify(v));
+        } catch {}
+      }
+      // 失敗したレポートを同じ内容で作り直す(新しい行として一覧に出て、失敗した行は隠す)
+      async function retryJob(id, btn) {
+        const payload = loadJSON("-payloads", {})[id];
+        if (!payload) return;
+        btn.disabled = true;
+        btn.textContent = "依頼中…";
+        try {
+          await postReport(payload);
+          saveJSON("-retried", [...loadJSON("-retried", []), id].slice(-50));
+          if (viewId === id) viewId = null;
+          renderJobs();
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = "再作成";
+          alert(
+            "再作成を開始できませんでした(server.py が動いているか確認): " +
+              e.message,
+          );
+        }
+      }
+      $("btnReport").onclick = async () => {
+        if (!state.segments.length && !$("notes").value.trim()) {
+          alert("文字起こしもメモもまだありません。");
+          return;
+        }
+        save();
+        $("btnReport").disabled = true;
+        const ok = await submitReport(state); // 受け付けられなかったときは今の発表を消さない
+        $("btnReport").disabled = false;
+        if (!ok) {
+          alert($("sumErr").textContent);
+          return;
+        }
+        resetTalk();
+      };
 
-$("btnNew").onclick = () => {
-  if (!confirm(`今の${M().unit}の文字起こし・要約・メモを、${M().reportHeading}を作らずに消去しますか?`)) return;
-  resetTalk();
-};
-for (const id of ["notes", "mTitle", "mSpeaker", "mSession", "outLang"]) $(id).addEventListener("input", save);
+      async function pollJobs() {
+        clearTimeout(pollTimer);
+        try {
+          jobs = await (await fetch("/api/jobs")).json();
+          renderJobs();
+          if (viewId) await showJob(viewId, false);
+        } catch {}
+        if (jobs.some((j) => j.status === "running"))
+          pollTimer = setTimeout(pollJobs, 2000);
+      }
+      function renderJobs() {
+        const ul = $("jobs");
+        if (!jobs.length) return;
+        ul.innerHTML = "";
+        const label = { running: "作成中…", done: "✓ 保存済み", error: "失敗" };
+        const retried = new Set(loadJSON("-retried", [])),
+          payloads = loadJSON("-payloads", {});
+        for (const j of jobs) {
+          if (j.status === "error" && retried.has(j.id)) continue; // 再作成済みの失敗は隠す
+          const li = document.createElement("li"),
+            b = document.createElement("button");
+          b.className = "job" + (j.id === viewId ? " sel" : "");
+          const badge = document.createElement("span");
+          badge.className = "badge " + j.status;
+          badge.textContent = label[j.status];
+          const tm = document.createElement("span");
+          tm.className = "muted";
+          tm.textContent = j.started;
+          const extra = j.error
+            ? "  — " + j.error
+            : j.status === "running" && j.stage
+              ? `  (${j.stage})`
+              : j.status === "done"
+                ? `  [${(j.files || []).map((f) => f.split(".").pop()).join("・")}]${j.note ? " ⚠ " + j.note : ""}`
+                : "";
+          const ti = document.createElement("span");
+          ti.textContent = j.title + extra;
+          b.append(badge, tm, ti);
+          b.onclick = () => showJob(j.id, true);
+          li.appendChild(b);
+          if (j.status === "error") {
+            const r = document.createElement("button");
+            r.className = "primary retry";
+            r.textContent = "再作成";
+            if (payloads[j.id]) r.onclick = () => retryJob(j.id, r);
+            else {
+              r.disabled = true;
+              r.title =
+                "依頼内容が残っていないため再作成できません(文字起こしは reports/ の各フォルダの transcript.txt に残っています)";
+            }
+            li.appendChild(r);
+          }
+          ul.appendChild(li);
+        }
+      }
+      async function showJob(id, userClick) {
+        const res = await fetch("/api/jobs/" + encodeURIComponent(id));
+        if (!res.ok) return;
+        const j = await res.json();
+        const ta = $("report");
+        // 作成中は届いた分を流し込む(作成中→完了の最後の 1 回まで反映する)
+        if (userClick || viewStatus === "running") {
+          const atBottom =
+            ta.scrollHeight - ta.scrollTop - ta.clientHeight < 40;
+          ta.value = j.text;
+          if (atBottom) ta.scrollTop = ta.scrollHeight;
+        }
+        viewStatus = j.status;
+        if (userClick) {
+          viewId = id;
+          renderJobs();
+        }
+        ta.hidden = false;
+        $("btnCopy").disabled = false;
+        const files = (j.files || []).join("・");
+        $("reportStatus").textContent = {
+          running: `${j.stage || "作成中"}…(完成すると自動保存)`,
+          done:
+            `✓ reports/${j.id}/ に保存済み(${files})` +
+            (j.note ? ` ⚠ ${j.note}` : ""),
+          error: `作成に失敗(文字起こしは reports/${j.id}/transcript.txt に保存済み)`,
+        }[j.status];
+        if (j.status === "running" && userClick) pollJobs();
+      }
+      $("btnCopy").onclick = () =>
+        navigator.clipboard.writeText($("report").value);
+      // 選んでいるレポートがあればそのフォルダ、なければ reports/ を開く
+      $("btnOpenDir").onclick = () =>
+        fetch("/api/open-reports", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: viewId }),
+        }).catch(() => {});
 
-// ---------- AIに聞く ----------
-// 発表の文脈を少ないトークンで渡す:
-// - 発表全体の流れ = すでに作ってあるライブ要約(文字起こしを圧縮したもの)を使い回す
-// - 直近の詳しい内容 = 文字起こしの最後の部分だけ
-const ASK_RECENT_CHARS = 4000;     // 直近の文字起こし(英語で約 5 分ぶん)
-const ASK_FULL_SUMMARIES = 20;     // 要約文まで送る件数(新しい方から)。それより前は見出しだけ
-// 古い要約は見出し(topic)だけにし、同じ見出しが続くものはまとめる
-function askTimeline() {
-  const tl = state.timeline, cut = Math.max(0, tl.length - ASK_FULL_SUMMARIES);
-  const older = [];
-  for (const t of tl.slice(0, cut)) {
-    if (!older.length || older[older.length - 1].topic !== t.topic) older.push({ time: t.time, topic: t.topic, now: "" });
-  }
-  return [...older, ...tl.slice(cut)];
-}
-$("askForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const question = $("askInput").value.trim();
-  if (!question || $("btnAsk").disabled) return;
-  const box = $("askAnswer"), q = document.createElement("div"), a = document.createElement("div");
-  q.className = "q"; q.textContent = "Q. " + question; a.textContent = "考え中…";
-  box.replaceChildren(q, a); box.hidden = false;
-  $("btnAsk").disabled = true;
-  try {
-    const res = await fetch("/api/ask", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, lang: $("outLang").value, title: $("mTitle").value, notes: $("notes").value,
-                             mode: $("mode").value,
-                             transcript: fullTranscript().slice(-ASK_RECENT_CHARS),
-                             timeline: askTimeline() }),
-    });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "HTTP " + res.status);
-    const reader = res.body.getReader(), dec = new TextDecoder();
-    let text = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text += dec.decode(value, { stream: true });
-      a.textContent = text;
-    }
-    if (!text) a.textContent = "(答えが返ってきませんでした)";
-  } catch (err) {
-    a.textContent = "答えを取得できませんでした: " + err.message;
-  } finally {
-    $("btnAsk").disabled = false;
-  }
-};
+      $("btnNew").onclick = () => {
+        if (
+          !confirm(
+            `今の${M().unit}の文字起こし・要約・メモを、${M().reportHeading}を作らずに消去しますか?`,
+          )
+        )
+          return;
+        resetTalk();
+      };
+      for (const id of ["notes", "mTitle", "mSpeaker", "mSession", "outLang"])
+        $(id).addEventListener("input", save);
 
-// ---------- 「発表情報・設定」のたたみ ----------
-// たたんでいる間は見出しの横に今の発表タイトルだけ出す
-function updateMetaBrief() {
-  $("metaBrief").textContent = $("mTitle").value || `(${M().title[0]}未入力)`;
-}
-function setMetaCollapsed(c) {
-  $("metaSec").classList.toggle("collapsed", c);
-  $("btnMeta").setAttribute("aria-expanded", String(!c));
-  $("btnMeta").querySelector(".chev").textContent = c ? "▸" : "▾";
-  updateMetaBrief();
-  try { localStorage.setItem(STORE_KEY + "-metaCollapsed", c ? "1" : "0"); } catch {}
-}
-$("btnMeta").onclick = () => setMetaCollapsed(!$("metaSec").classList.contains("collapsed"));
-try { setMetaCollapsed(localStorage.getItem(STORE_KEY + "-metaCollapsed") === "1"); } catch { setMetaCollapsed(false); }
+      // ---------- AIに聞く ----------
+      // 発表の文脈を少ないトークンで渡す:
+      // - 発表全体の流れ = すでに作ってあるライブ要約(文字起こしを圧縮したもの)を使い回す
+      // - 直近の詳しい内容 = 文字起こしの最後の部分だけ
+      const ASK_RECENT_CHARS = 4000; // 直近の文字起こし(英語で約 5 分ぶん)
+      const ASK_FULL_SUMMARIES = 20; // 要約文まで送る件数(新しい方から)。それより前は見出しだけ
+      // 古い要約は見出し(topic)だけにし、同じ見出しが続くものはまとめる
+      function askTimeline() {
+        const tl = state.timeline,
+          cut = Math.max(0, tl.length - ASK_FULL_SUMMARIES);
+        const older = [];
+        for (const t of tl.slice(0, cut)) {
+          if (!older.length || older[older.length - 1].topic !== t.topic)
+            older.push({ time: t.time, topic: t.topic, now: "" });
+        }
+        return [...older, ...tl.slice(cut)];
+      }
+      $("askForm").onsubmit = async (e) => {
+        e.preventDefault();
+        const question = $("askInput").value.trim();
+        if (!question || $("btnAsk").disabled) return;
+        const box = $("askAnswer"),
+          q = document.createElement("div"),
+          a = document.createElement("div");
+        q.className = "q";
+        q.textContent = "Q. " + question;
+        a.textContent = "考え中…";
+        box.replaceChildren(q, a);
+        box.hidden = false;
+        $("btnAsk").disabled = true;
+        try {
+          const res = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question,
+              lang: $("outLang").value,
+              title: $("mTitle").value,
+              notes: $("notes").value,
+              mode: $("mode").value,
+              transcript: fullTranscript().slice(-ASK_RECENT_CHARS),
+              timeline: askTimeline(),
+            }),
+          });
+          if (!res.ok)
+            throw new Error(
+              (await res.json().catch(() => ({}))).error ||
+                "HTTP " + res.status,
+            );
+          const reader = res.body.getReader(),
+            dec = new TextDecoder();
+          let text = "";
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            text += dec.decode(value, { stream: true });
+            a.textContent = text;
+          }
+          if (!text) a.textContent = "(答えが返ってきませんでした)";
+        } catch (err) {
+          a.textContent = "答えを取得できませんでした: " + err.message;
+        } finally {
+          $("btnAsk").disabled = false;
+        }
+      };
 
-// ---------- テーマ(自動 / ライト / ダーク) ----------
-const THEMES = ["auto", "light", "dark"], THEME_LABEL = { auto: "🌓 自動", light: "☀ ライト", dark: "🌙 ダーク" };
-function applyTheme(t) {
-  if (t === "auto") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.dataset.theme = t;
-  $("btnTheme").textContent = THEME_LABEL[t];
-}
-let theme = "auto";
-try { theme = localStorage.getItem(STORE_KEY + "-theme") || "auto"; } catch {}
-if (!THEMES.includes(theme)) theme = "auto";
-applyTheme(theme);
-$("btnTheme").onclick = () => {
-  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
-  applyTheme(theme);
-  try { localStorage.setItem(STORE_KEY + "-theme", theme); } catch {}
-};
+      // ---------- 「発表情報・設定」のたたみ ----------
+      // たたんでいる間は見出しの横に今の発表タイトルだけ出す
+      function updateMetaBrief() {
+        $("metaBrief").textContent =
+          $("mTitle").value || `(${M().title[0]}未入力)`;
+      }
+      function setMetaCollapsed(c) {
+        $("metaSec").classList.toggle("collapsed", c);
+        $("btnMeta").setAttribute("aria-expanded", String(!c));
+        $("btnMeta").querySelector(".chev").textContent = c ? "▸" : "▾";
+        updateMetaBrief();
+        try {
+          localStorage.setItem(STORE_KEY + "-metaCollapsed", c ? "1" : "0");
+        } catch {}
+      }
+      $("btnMeta").onclick = () =>
+        setMetaCollapsed(!$("metaSec").classList.contains("collapsed"));
+      try {
+        setMetaCollapsed(
+          localStorage.getItem(STORE_KEY + "-metaCollapsed") === "1",
+        );
+      } catch {
+        setMetaCollapsed(false);
+      }
 
-load();
-pollJobs();
-if (!SR) setStatus("このブラウザは音声認識非対応(Edge を使用)", false);
-</script>
-</body>
+      // ---------- テーマ(自動 / ライト / ダーク) ----------
+      const THEMES = ["auto", "light", "dark"],
+        THEME_LABEL = { auto: "🌓 自動", light: "☀ ライト", dark: "🌙 ダーク" };
+      function applyTheme(t) {
+        if (t === "auto")
+          document.documentElement.removeAttribute("data-theme");
+        else document.documentElement.dataset.theme = t;
+        $("btnTheme").textContent = THEME_LABEL[t];
+      }
+      let theme = "auto";
+      try {
+        theme = localStorage.getItem(STORE_KEY + "-theme") || "auto";
+      } catch {}
+      if (!THEMES.includes(theme)) theme = "auto";
+      applyTheme(theme);
+      $("btnTheme").onclick = () => {
+        theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+        applyTheme(theme);
+        try {
+          localStorage.setItem(STORE_KEY + "-theme", theme);
+        } catch {}
+      };
+
+      load();
+      pollJobs();
+      if (!SR) setStatus("このブラウザは音声認識非対応(Edge を使用)", false);
+    </script>
+  </body>
 </html>
